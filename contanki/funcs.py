@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -64,6 +65,7 @@ def get_config() -> dict:
         "Cursor Speed": 10,
         "Cursor Acceleration": 10,
         "Stick Deadzone": 5,
+        "Cursor Deadzone": 15,
         "Enable Control Overlays": True,
         "Large Overlays": False,
         "Overlays Always On": False,
@@ -236,11 +238,11 @@ def move_mouse_build() -> Callable[[float, float], None]:
     assert config is not None
     speed = config["Cursor Speed"] / 2
     accel = config["Cursor Acceleration"] / 5
-    deadzone = config["Stick Deadzone"] / 100
+    deadzone = config.get("Cursor Deadzone", 15) / 100
     multiple_screens = dbg("Multiple screens", len(mw.app.screens()) > 1)
 
     def move_mouse(move_x: float, move_y: float) -> None:
-        if abs(move_x) + abs(move_y) < deadzone:
+        if math.hypot(move_x, move_y) < deadzone:
             return
         cursor = mw.cursor()
         pos = cursor.pos()  # type: ignore
