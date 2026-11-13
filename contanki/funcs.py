@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+from pathlib import Path
 from typing import Any, Callable
 from functools import partial
 from os.path import dirname, abspath
@@ -80,10 +82,16 @@ def get_config() -> dict:
         config.update(loaded_config)
 
     if "Rumble" not in loaded_config:
+        legacy_rumble = None
+        legacy_config_path = Path(addon_path).parent / "787807852" / "config.json"
         try:
-            legacy_rumble = mw.addonManager.getConfig("787807852")
-        except Exception:
-            legacy_rumble = None
+            with legacy_config_path.open("r", encoding="utf-8") as legacy_file:
+                legacy_rumble = json.load(legacy_file)
+        except (OSError, json.JSONDecodeError):
+            try:
+                legacy_rumble = mw.addonManager.getConfig("787807852")
+            except Exception:
+                legacy_rumble = None
         if isinstance(legacy_rumble, dict):
             config["Rumble"] = migrate_legacy_rumble_config(legacy_rumble)
     else:
