@@ -143,6 +143,7 @@ class RumbleManager:
         self._initialized = False
         self._gamepad: int | None = None
         self._instance_id: int | None = None
+        self._rumble_generation = 0
 
     @staticmethod
     def _decode(value: bytes | None) -> str:
@@ -322,11 +323,35 @@ class RumbleManager:
             return self.stop()
         if not self._ensure_gamepad():
             return False
+        self._rumble_generation += 1
+        generation = self._rumble_generation
         if not self._dll.SDL_RumbleGamepad(self._gamepad, left, right, duration):
             logger.warning("SDL_RumbleGamepad failed: %s", self._error())
             self._close_gamepad()
             return False
+        # SDL's duration is a driver-side hint. Also schedule an explicit stop
+        # on Anki's Qt event loop so hardware/driver timing cannot leave a long
+        # pulse running beyond the user's configured duration.
+        self._schedule_stop(duration, generation)
         return True
+
+    def _schedule_stop(self, duration_ms: int, generation: int) -> None:
+        """Schedule a generation-safe stop without creating a worker thread."""
+        try:
+            from aqt.qt import QTimer
+
+            QTimer.singleShot(
+                duration_ms,
+                lambda: self._stop_if_generation(generation),
+            )
+        except Exception:
+            # SDL still receives its native duration; this is a defensive
+            # fallback for standalone tests or unusual Anki Qt environments.
+            logger.exception("Unable to schedule the rumble safety stop.")
+
+    def _stop_if_generation(self, generation: int) -> None:
+        if generation == self._rumble_generation:
+            self.stop()
 
     def trigger(self, ease: int, config: Any) -> bool:
         """Play the configured feedback for Again/Hard/Good/Easy."""
@@ -354,6 +379,7 @@ class RumbleManager:
 
     def stop(self) -> bool:
         """Stop both motors immediately when a device is open."""
+        self._rumble_generation += 1
         if not self._gamepad or not self._dll:
             return True
         ok = bool(self._dll.SDL_RumbleGamepad(self._gamepad, 0, 0, 0))
