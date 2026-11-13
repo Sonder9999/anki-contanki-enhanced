@@ -32,6 +32,11 @@ except ImportError:
     is_win = False
 
 from .utils import State, dbg
+from .rumble import (
+    default_rumble_config,
+    migrate_legacy_rumble_config,
+    normalize_rumble_config,
+)
 
 from aqt import mw as _mw
 
@@ -63,14 +68,26 @@ def get_config() -> dict:
         "Overlays in Quick Select": True,
         "Detect 8BitDo Controllers": False,
         "Custom Actions": {},
+        "Rumble": default_rumble_config(),
     }
 
     loaded_config = mw.addonManager.getConfig(__name__)
 
     if loaded_config is None:
         tooltip("Contanki was unable to load config, using defaults.")
+        loaded_config = {}
     else:
         config.update(loaded_config)
+
+    if "Rumble" not in loaded_config:
+        try:
+            legacy_rumble = mw.addonManager.getConfig("787807852")
+        except Exception:
+            legacy_rumble = None
+        if isinstance(legacy_rumble, dict):
+            config["Rumble"] = migrate_legacy_rumble_config(legacy_rumble)
+    else:
+        config["Rumble"] = normalize_rumble_config(config["Rumble"])
 
     mw.addonManager.writeConfig(__name__, config)
     return config

@@ -51,6 +51,7 @@ from .profile import (
 from .actions import QUICK_SELECT_ACTIONS, STATE_ACTIONS
 from .icons import ButtonIcon, get_button_icon
 from .utils import State, slugify, user_files_path, dbg
+from .rumble import normalize_rumble_config
 
 assert _mw is not None
 mw = _mw
@@ -112,6 +113,8 @@ class ContankiConfig(QDialog):
         self.tab_bar.addTab(self.controls_page, "Controls")
         self.controller_page = ControllerPage(self, profile.controller)
         self.tab_bar.addTab(self.controller_page, "Controller")
+        self.rumble_page = RumblePage(self)
+        self.tab_bar.addTab(self.rumble_page, "Rumble")
         layout.addWidget(self.tab_bar)
 
         # Add buttons
@@ -140,6 +143,7 @@ class ContankiConfig(QDialog):
         for profile in self.to_delete:
             delete_profile(profile)
         self.config.update(self.options_page.get())
+        self.config["Rumble"] = self.rumble_page.get()
         self.options_page.profile_bar.save_all()
         mw.addonManager.writeConfig(__name__, self.config)
         update_assigned_profiles(self._profile.controller, self._profile.name)
@@ -181,7 +185,7 @@ class ContankiConfig(QDialog):
         self.options_page.update()
         self.controls_page.update_tabs()
         self.controller_page = ControllerPage(self, self._profile.controller)
-        self.tab_bar.addTab(self.controller_page, "Controller")
+        self.tab_bar.insertTab(2, self.controller_page, "Controller")
         self.tab_bar.setCurrentIndex(current_tab)
         self.loaded = True
 
@@ -1084,3 +1088,88 @@ class ControllerPage(QWidget):
             layout.replaceWidget(self.icon, new_icon)
             self.icon.deleteLater()
             self.icon = new_icon
+
+class RumblePage(QWidget):
+    """Configure native controller vibration for each review answer."""
+
+    GRADES = (
+        ("again", "Again"),
+        ("hard", "Hard"),
+        ("good", "Good"),
+        ("easy", "Easy"),
+    )
+
+    def __init__(self, parent: ContankiConfig) -> None:
+        super().__init__(parent)
+        self._parent = parent
+        self.settings = normalize_rumble_config(parent.config.get("Rumble"))
+        layout = QVBoxLayout(self)
+        self.enabled = QCheckBox("Enable answer vibration", self)
+        self.enabled.setChecked(self.settings["enabled"])
+        layout.addWidget(self.enabled)
+
+        group = QGroupBox("Feedback by answer", self)
+        grid = QGridLayout(group)
+        headers = (
+            "Answer", "Enabled", "Left motor (%)", "Right motor (%)", "Duration (ms)"
+        )
+        for column, title in enumerate(headers):
+            grid.addWidget(QLabel(title, group), 0, column)
+
+        self.grade_controls: dict[str, tuple[QCheckBox, QSpinBox, QSpinBox, QSpinBox]] = {}
+        for row, (key, label) in enumerate(self.GRADES, start=1):
+            values = self.settings[key]
+            grid.addWidget(QLabel(label, group), row, 0)
+            enabled = QCheckBox(group)
+            enabled.setChecked(values["enabled"])
+            grid.addWidget(enabled, row, 1, alignment=Alignment.AlignCenter)
+
+            left = QSpinBox(group)
+            left.setRange(0, 100)
+            left.setSuffix("%")
+            left.setValue(values["left_intensity"])
+            grid.addWidget(left, row, 2)
+
+            right = QSpinBox(group)
+            right.setRange(0, 100)
+            right.setSuffix("%")
+            right.setValue(values["right_intensity"])
+            grid.addWidget(right, row, 3)
+
+            duration = QSpinBox(group)
+            duration.setRange(0, 60000)
+            duration.setSingleStep(50)
+            duration.setSuffix(" ms")
+            duration.setValue(values["duration_ms"])
+            grid.addWidget(duration, row, 4)
+            self.grade_controls[key] = (enabled, left, right, duration)
+
+        layout.addWidget(group)
+        layout.addWidget(
+            QLabel(
+                "SDL3 HIDAPI is used for output; browser Gamepad API input is unchanged.",
+                self,
+            )
+        )
+        layout.addWidget(Button(self, "Test Vibration", self.test_vibration))
+        layout.addStretch(1)
+        self.setLayout(layout)
+
+    def get(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"enabled": self.enabled.isChecked()}
+        for key, controls in self.grade_controls.items():
+            enabled, left, right, duration = controls
+            result[key] = {
+                "enabled": enabled.isChecked(),
+                "left_intensity": left.value(),
+                "right_intensity": right.value(),
+                "duration_ms": duration.value(),
+            }
+        return result
+
+    def test_vibration(self) -> None:
+        if not self._parent.contanki.rumble.test():
+            showInfo(
+                "Vibration test failed. Make sure a DualSense is connected "
+                "and selected in Contanki."
+            )

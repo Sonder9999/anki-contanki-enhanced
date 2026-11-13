@@ -7,7 +7,7 @@ from typing import Any, Callable
 from collections import defaultdict
 
 from aqt import gui_hooks
-from aqt.qt import QAction, qconnect
+from aqt.qt import QAction, QCoreApplication, qconnect
 from aqt.utils import current_window, tooltip
 from aqt.webview import AnkiWebView
 
@@ -30,6 +30,7 @@ from .profile import (
     find_profile,
 )
 from .actions import button_actions, release_actions, update_actions, SCROLL_FACTOR
+from .rumble import RumbleManager
 
 from aqt import mw as _mw
 
@@ -66,6 +67,11 @@ class Contanki(AnkiWebView):
 
     def __init__(self, parent):
         super().__init__(parent=parent)
+        self.rumble = RumbleManager()
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.rumble.close)
+        gui_hooks.reviewer_did_answer_card.append(self.on_reviewer_did_answer_card)
         mw.addonManager.setConfigAction(__name__, self.on_config)
         self.menu_item = QAction("Controller Options", mw)
         qconnect(self.menu_item.triggered, self.on_config)
@@ -89,11 +95,16 @@ class Contanki(AnkiWebView):
 
     def suspend(self):
         """Suspends JS execution. Necessary to prevent crash when Anki exits."""
+        self.rumble.stop()
         self.stdHtml("")
 
     def resume(self):
         """Resumes the add-on"""
         self.stdHtml(f"""<script type="text/javascript">\n{self.script}\n</script>""")
+
+    def on_reviewer_did_answer_card(self, reviewer, card, ease: int) -> None:
+        """Play configured feedback after Anki records a review answer."""
+        self.rumble.trigger(ease, self.config.get("Rumble"))
 
     @property
     def profile(self) -> Profile | None:
@@ -408,6 +419,7 @@ class Contanki(AnkiWebView):
         self.buttons = [False] * self.len_buttons
         self.axes = [False] * self.len_axes
         self.controller_id = controller_id
+        self.rumble.set_controller_id(controller_id)
 
         mw.form.menuTools.addAction(self.menu_item)
         self.update_debug_info()
@@ -429,6 +441,7 @@ class Contanki(AnkiWebView):
 
     def reset_controller(self) -> None:
         """Clears the current controller"""
+        self.rumble.set_controller_id(None)
         if self.overlay:
             self.overlay.disappear()
         self.quick_select.disappear()
